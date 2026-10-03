@@ -1,0 +1,22 @@
+[Desktop Entry]
+Type=Application
+Name=Kikibindings
+Comment=Global shortcuts from https://github.com/edrpls/kikibindings
+Icon=preferences-desktop-keyboard-shortcut
+Exec=true
+NoDisplay=true
+StartupNotify=false
+X-KDE-GlobalShortcutType=Service
+Actions=vicinae-clipboard;vicinae-emoji;
+
+[Desktop Action vicinae-clipboard]
+Name=Vicinae Clipboard History
+Icon=vicinae
+Exec=vicinae deeplink "vicinae://launch/clipboard/history?toggle=true"
+X-KDE-Shortcuts=Meta+Ctrl+Alt+Shift+C
+
+[Desktop Action vicinae-emoji]
+Name=Vicinae Emoji Search
+Icon=vicinae
+Exec=vicinae deeplink "vicinae://launch/core/search-emojis?toggle=true"
+X-KDE-Shortcuts=Meta+Ctrl+Alt+Shift+Space
