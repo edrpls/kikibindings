@@ -268,7 +268,8 @@ kga() {
 
 # Keys of an action in kglobalaccel's allShortcutInfos output, as sorted
 # integers separated by spaces: list 1 is the live keys, list 2 the
-# defaults. Prints "missing " if the action isn't there.
+# defaults. Prints "missing " if the action isn't there. kglobalaccel shows
+# "no key" as [0] in some places, so 0 is dropped.
 action_keys() {
 	awk -v a="$2" -v which="$3" -v q="'" '
 		{ n = split($0, tuples, /\), \(/) }
@@ -289,7 +290,7 @@ action_keys() {
 				print keys
 			}
 			if (!found) print "missing"
-		}' <<<"$1" | tr ' ' '\n' | sed '/^$/d' | sort -n | tr '\n' ' '
+		}' <<<"$1" | tr ' ' '\n' | sed '/^0*$/d' | sort -n | tr '\n' ' '
 }
 
 # Live keys of all Kikibindings shortcuts, or fails.
@@ -547,7 +548,7 @@ snapshot_bindings
 # Shortcuts that will get a new default key: ones new to this machine, and
 # ones whose default changed in the repo, unless the user set their own key.
 needs_check() {
-	[[ -z $(user_binding "$1") ]] || return 1
+	[[ -z ${binding[$1]} ]] || return 1
 	! is_installed_action "$1" || [[ $(installed_key "$1") != "${action_key[$1]}" ]]
 }
 
@@ -572,7 +573,7 @@ unbound=()
 # them. Bindings left at their default aren't in kglobalshortcutsrc, so work
 # those out here.
 for action in "${actions[@]}"; do
-	key=$(user_binding "$action")
+	key=${binding[$action]}
 	if [[ -z $key ]]; then
 		is_installed_action "$action" && ! needs_check "$action" || continue
 		key=${action_key[$action]}
