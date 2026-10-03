@@ -8,11 +8,12 @@ group in System Settings > Shortcuts, with one entry per shortcut.
 | Vicinae Clipboard History | Meta+Ctrl+Alt+Shift+C | `vicinae deeplink "vicinae://launch/clipboard/history?toggle=true"` |
 | Vicinae Emoji Search | Meta+Ctrl+Alt+Shift+Space | `vicinae deeplink "vicinae://launch/core/search-emojis?toggle=true"` |
 
-Requires Plasma 6 (Plasma 5 is untested) with `kwriteconfig6` and
-`kreadconfig6`, bash 4.4+, and the programs the shortcuts run
-([Vicinae](https://vicinae.com) for the ones above). `gdbus` and
-`kbuildsycoca6`, which every Plasma 6 desktop has, let the shortcuts load
-without logging out.
+Requires KDE Plasma 6.0.3 or newer (earlier versions, including Plasma 5,
+can't load shortcuts this way), bash 4.4+, and the programs the shortcuts
+run ([Vicinae](https://vicinae.com) for the ones above). The script uses
+`kwriteconfig6`, `kreadconfig6`, `kbuildsycoca6` and `gdbus`, which every
+Plasma 6 desktop has, plus GNU coreutils. The version check needs
+`plasmashell` on the `PATH` and is skipped without it.
 
 ## Install
 
@@ -35,18 +36,23 @@ login.
   in System Settings > Shortcuts > Kikibindings. The same goes for a
   shortcut whose default key changed in the repo. This check is only
   complete inside a Plasma session; without one, keys other shortcuts use
-  by default aren't seen.
+  by default aren't seen. Inside a session, a default key the script can't
+  check (media and volume keys, `Menu`, keypad keys, or any key when
+  kglobalaccel doesn't answer) is also left unbound. An unbound shortcut
+  counts as your choice: it stays unbound until you give it a key.
 - Keys you change in System Settings are kept across updates, and
   *Reset to default* goes back to the key in the table above (once
   `./install.sh` has been run since your last `git pull`).
 - If Plasma doesn't pick up an update, the script says so and exits with an
   error; log out and back in to load it.
-- Re-running when nothing changed does nothing. When the file changed, the
-  old copy is saved to `~/.local/state/kikibindings/` first (the last 10
-  are kept).
+- Re-running when nothing changed only makes sure Plasma has the shortcuts
+  loaded with the right keys, which also repairs an interrupted run.
+- When the file changed, the old copy is saved to
+  `~/.local/state/kikibindings/` first (the last 10 are kept).
 
 `./install.sh --uninstall` removes the group, including any keys you
-customised for it, after saving a backup the same way.
+customised for it, after saving a backup the same way. If the file is
+already gone, it still clears those keys.
 
 ## Adding a shortcut
 
@@ -66,9 +72,16 @@ X-KDE-Shortcuts=Meta+Ctrl+Alt+Shift+T
 - `Name` is what System Settings shows. The group itself is listed under
   *Applications*.
 - `X-KDE-Shortcuts` is the default key, written the way System Settings
-  shows it (`Meta+Ctrl+Alt+Shift+T`, `Meta+F5`, `Ctrl+Alt+Space`). Give one
-  key; leave it out for a shortcut with no default key.
-- Put URLs and other arguments with special characters in double quotes.
+  shows it (`Meta+Ctrl+Alt+Shift+T`, `Meta+F5`, `Ctrl+Alt+Space`). Give a
+  single key (no commas, so the comma key can't be a default), made of
+  modifiers plus a letter, digit, punctuation, `F1`–`F35`, `Space`,
+  `Return`, `Tab`, `Esc`, arrows, `Home`/`End`, `PgUp`/`PgDown`, `Ins`/`Del`
+  or `Print`; for other keys, leave the default out and bind it in System
+  Settings. At least one shortcut in the file needs a default key, or Plasma
+  won't load the group.
+- Put URLs and other arguments with special characters in double quotes,
+  and write a literal `%` as `%%` (`%20` → `%%20`), since `%` starts a
+  field code in `Exec`.
   Don't make the shortcut with System Settings > Shortcuts > *Add Command*
   and copy it over: that dialog breaks URLs that have a query string
   (`?toggle=true`).
