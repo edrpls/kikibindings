@@ -31,6 +31,12 @@ fixes change how `install.sh` behaves, review the fixes again.
   was done about each. Findings that weren't fixed are listed as declined,
   with the reason.
 
+## No session links (required)
+
+Never include links to Claude sessions anywhere in the repo or on GitHub:
+no `Claude-Session:` trailers or `claude.ai/code/session…` URLs in commit
+messages, PR or issue descriptions, comments, or files.
+
 ## Conventions
 
 - The file name `net.local.kikibindings.desktop` is the kglobalaccel
