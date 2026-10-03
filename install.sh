@@ -183,7 +183,9 @@ if [[ -z $(printf '%s' "${action_key[@]}") ]]; then
 fi
 
 installed_actions=()
-if [[ -f $dest ]]; then
+# A symlinked install may point at this very file, so it can't tell which
+# shortcuts are new; treat them all as new.
+if [[ -f $dest && ! -L $dest ]]; then
 	mapfile -t installed_actions < <(desktop_actions "$dest")
 fi
 is_installed_action() {
@@ -202,7 +204,9 @@ if [[ $mode == list ]]; then
 	for action in "${actions[@]}"; do
 		status="not installed"
 		key=${action_key[$action]:-(none)}
-		if is_installed_action "$action"; then
+		if [[ -L $dest ]]; then
+			status="installed as a symlink; run ${0##*/} to replace it"
+		elif is_installed_action "$action"; then
 			status=installed
 			old=$(installed_key "$action")
 			if [[ $old != "${action_key[$action]}" ]]; then
@@ -231,8 +235,9 @@ kbuildsycoca=$(first_cmd kbuildsycoca6 || true)
 # Plasma 6.0.3 is the first version whose kglobalaccel loads shortcuts from
 # desktop actions and notices new or removed files without a re-login.
 # KWin is released with kglobalaccel; plasmashell isn't asked because it
-# needs a display even for --version. Skipped when KWin isn't installed.
-if { version_out=$(kwin_wayland --version 2>/dev/null) ||
+# can crash without a usable display, even for --version. Skipped when
+# KWin isn't installed, and for --uninstall, which works on any Plasma 6.
+if [[ $mode != uninstall ]] && { version_out=$(kwin_wayland --version 2>/dev/null) ||
 	version_out=$(kwin_x11 --version 2>/dev/null); } &&
 	[[ $version_out =~ ([0-9]+\.[0-9]+(\.[0-9]+)?) ]]; then
 	plasma_version=${BASH_REMATCH[1]}
@@ -261,17 +266,54 @@ kga() {
 		-m "org.kde.KGlobalAccel.$1" "${@:2}"
 }
 
+# Keys of an action in kglobalaccel's allShortcutInfos output, as sorted
+# integers separated by spaces: list 1 is the live keys, list 2 the
+# defaults. Prints "missing " if the action isn't there.
+action_keys() {
+	awk -v a="$2" -v which="$3" -v q="'" '
+		{ n = split($0, tuples, /\), \(/) }
+		END {
+			for (i = 1; i <= n; i++) {
+				t = tuples[i]
+				sub(/^[(\[]+/, "", t)
+				if (index(t, q a q ", ") != 1) continue
+				found = 1
+				# Skip the strings: the key lists follow the last quote.
+				sub(".*[" q "\"]", "", t)
+				keys = ""
+				for (k = 1; k <= which && match(t, /\[[0-9, ]*\]/); k++) {
+					keys = substr(t, RSTART + 1, RLENGTH - 2)
+					t = substr(t, RSTART + RLENGTH)
+				}
+				gsub(/,/, "", keys)
+				print keys
+			}
+			if (!found) print "missing"
+		}' <<<"$1" | tr ' ' '\n' | sed '/^$/d' | sort -n | tr '\n' ' '
+}
+
+# Live keys of all Kikibindings shortcuts, or fails.
+live_infos() {
+	local component
+	component=$(kga getComponent "$id" | grep -o "'/[^']*'" | tr -d "'") &&
+		gdbus call --session -d org.kde.kglobalaccel -o "$component" \
+			-m org.kde.kglobalaccel.Component.allShortcutInfos
+}
+
 # True while kglobalaccel has the Kikibindings component loaded.
 component_loaded() {
 	[[ $(kga allActionsForComponent "['$id']" 2>/dev/null) == *"'$id'"* ]]
 }
 
-# True once kglobalaccel has every shortcut in the repo file loaded.
+# True once kglobalaccel has every shortcut in the repo file loaded, with
+# the repo's default keys (so an older version doesn't count).
 component_complete() {
-	local loaded action
-	loaded=$(kga allActionsForComponent "['$id']" 2>/dev/null) || return 1
+	local infos action want
+	infos=$(live_infos 2>/dev/null) || return 1
 	for action in "${actions[@]}"; do
-		[[ $loaded == *"'$id', '$action',"* ]] || return 1
+		want=
+		[[ -z ${action_key[$action]} ]] || want="$(key_to_int "${action_key[$action]}") "
+		[[ $(action_keys "$infos" "$action" 2) == "$want" ]] || return 1
 	done
 }
 
@@ -328,14 +370,15 @@ user_binding() {
 
 # True if a shortcut outside Kikibindings already uses this key sequence.
 # (Kikibindings' own keys are tracked in $claimed, since they may be about
-# to change.) Keys key_to_int can't convert count as taken in a session,
-# because the config scan below can't see everything.
+# to change.) Defaults are checked with key_to_int when the file is read, so
+# the conversion here only fails if that check is ever bypassed; such keys
+# count as taken.
 key_taken() {
 	local seq=$1 keyint
 	if ((have_session)); then
 		local holders
 		keyint=$(key_to_int "$seq") || return 0
-		# Holders of this exact key (0) or of chords starting with it (1).
+		# Holders of this exact key (0) or of chords containing it (1).
 		# If kglobalaccel can't be asked, assume the key is taken.
 		local type out
 		holders=
@@ -393,9 +436,7 @@ snapshot_bindings() {
 sync_live() {
 	local component infos action want k ki have wanted keys name action_esc
 	local -a want_ints want_keys
-	if ! component=$(kga getComponent "$id" | grep -o "'/[^']*'" | tr -d "'") ||
-		! infos=$(gdbus call --session -d org.kde.kglobalaccel -o "$component" \
-			-m org.kde.kglobalaccel.Component.allShortcutInfos); then
+	if ! infos=$(live_infos 2>/dev/null); then
 		warn "couldn't read the live shortcuts; log out and back in if a key is wrong"
 		return 0
 	fi
@@ -406,29 +447,19 @@ sync_live() {
 		IFS=$'\t' read -ra want_keys <<<"${want//\\t/$'\t'}"
 		for k in "${want_keys[@]}"; do
 			[[ -n $k && $k != none ]] || continue
+			# A key this script can't convert (keypad, media...) can only be a
+			# binding the user set; leave it to kglobalaccel.
 			if ! ki=$(key_to_int "$k"); then
-				warn "${action_name[$action]}: can't sync '$k' live; log out and back in if it's wrong"
+				info "${action_name[$action]}: leaving '$k' to Plasma"
 				continue 2
 			fi
 			want_ints+=("$ki")
 		done
-		# Live keys of this action: the first [..] list in its tuple.
-		have=$(awk -v a="$action" -v q="'" '
-			{ n = split($0, tuples, /\), \(/) }
-			END {
-				for (i = 1; i <= n; i++) {
-					t = tuples[i]
-					sub(/^[(\[]+/, "", t)
-					if (index(t, q a q ", ") != 1) continue
-					# Skip the strings: the key lists follow the last quote.
-					sub(".*[" q "\"]", "", t)
-					if (match(t, /\[[0-9, ]*\]/)) {
-						keys = substr(t, RSTART + 1, RLENGTH - 2)
-						gsub(/,/, "", keys)
-						print keys
-					}
-				}
-			}' <<<"$infos" | tr ' ' '\n' | sed '/^$/d' | sort -n | tr '\n' ' ')
+		have=$(action_keys "$infos" "$action" 1)
+		if [[ $have == "missing " ]]; then
+			warn "${action_name[$action]} isn't loaded by Plasma yet; log out and back in"
+			continue
+		fi
 		wanted=$(printf '%s\n' "${want_ints[@]}" | sed '/^$/d' | sort -n | tr '\n' ' ')
 		[[ $have == "$wanted" ]] && continue
 		if ((${#want_ints[@]})); then
@@ -481,9 +512,19 @@ fi
 if [[ -f $dest && ! -L $dest ]] && cmp -s "$src" "$dest"; then
 	if ((have_session)); then
 		snapshot_bindings
-		if ! component_loaded; then
-			# A previous run installed the file but Plasma never loaded it.
-			echo "Kikibindings is installed but not loaded; loading it."
+		if ! component_complete; then
+			# A previous run installed the file but Plasma never loaded it,
+			# or still has an older version of it loaded.
+			echo "Plasma doesn't have the current shortcuts loaded; loading them."
+			if component_loaded; then
+				run rm "$dest"
+				if ! refresh unloaded; then
+					run install -m 644 "$src" "$dest"
+					warn "kglobalaccel didn't unload the old shortcuts; log out and back in to load the new ones"
+					exit 1
+				fi
+				run install -m 644 "$src" "$dest"
+			fi
 			if ! refresh loaded; then
 				warn "kglobalaccel still didn't load the shortcuts; log out and back in"
 				exit 1
@@ -526,13 +567,16 @@ claim_keys() {
 # shortcut to "none" instead, so it doesn't fight with the existing one.
 declare -A claimed=()
 unbound=()
-# Keys held by the other installed Kikibindings shortcuts. Bindings left at
-# their default aren't in kglobalshortcutsrc, so work them out here.
+# Keys held by the other Kikibindings shortcuts: every binding the user set
+# (installed or not), plus the defaults of installed shortcuts that keep
+# them. Bindings left at their default aren't in kglobalshortcutsrc, so work
+# those out here.
 for action in "${actions[@]}"; do
-	is_installed_action "$action" || continue
-	needs_check "$action" && continue
 	key=$(user_binding "$action")
-	[[ -n $key ]] || key=${action_key[$action]}
+	if [[ -z $key ]]; then
+		is_installed_action "$action" && ! needs_check "$action" || continue
+		key=${action_key[$action]}
+	fi
 	claim_keys "$key"
 done
 for action in "${actions[@]}"; do
@@ -545,7 +589,7 @@ for action in "${actions[@]}"; do
 		warn "$name: '$program' is not in PATH; the shortcut won't do anything until it is"
 	fi
 	[[ -n $key ]] || continue
-	keyid=$(key_to_int "$key" || echo "$key")
+	keyid=$(key_to_int "$key")
 	if [[ -n ${claimed[$keyid]:-} ]] || key_taken "$key"; then
 		warn "$name: $key is already used by another shortcut, or can't be checked; leaving it unbound"
 		info "pick a key in System Settings > Shortcuts > Kikibindings"
