@@ -12,8 +12,8 @@ Requires KDE Plasma 6.0.3 or newer (earlier versions, including Plasma 5,
 can't load shortcuts this way), bash 4.4+, and the programs the shortcuts
 run ([Vicinae](https://vicinae.com) for the ones above). The script uses
 `kwriteconfig6`, `kreadconfig6`, `kbuildsycoca6` and `gdbus`, which every
-Plasma 6 desktop has, plus GNU coreutils. The version check needs
-`plasmashell` on the `PATH` and is skipped without it.
+Plasma 6 desktop has, plus GNU coreutils. The version check asks
+`kwin_wayland` or `kwin_x11` and is skipped without them.
 
 ## Install
 
@@ -36,17 +36,18 @@ login.
   in System Settings > Shortcuts > Kikibindings. The same goes for a
   shortcut whose default key changed in the repo. This check is only
   complete inside a Plasma session; without one, keys other shortcuts use
-  by default aren't seen. Inside a session, a default key the script can't
-  check (media and volume keys, `Menu`, keypad keys, or any key when
-  kglobalaccel doesn't answer) is also left unbound. An unbound shortcut
-  counts as your choice: it stays unbound until you give it a key.
+  by default aren't seen. Inside a session, a key is also left unbound when
+  kglobalaccel doesn't answer the check. An unbound shortcut counts as your
+  choice: it stays unbound until you give it a key.
 - Keys you change in System Settings are kept across updates, and
   *Reset to default* goes back to the key in the table above (once
   `./install.sh` has been run since your last `git pull`).
 - If Plasma doesn't pick up an update, the script says so and exits with an
   error; log out and back in to load it.
-- Re-running when nothing changed only makes sure Plasma has the shortcuts
-  loaded with the right keys, which also repairs an interrupted run.
+- Re-running when nothing changed only makes sure Plasma has the current
+  shortcuts loaded, with the keys in your config. If a run was interrupted
+  while it was loading them, check the keys in System Settings: Plasma may
+  have given a conflicting shortcut its default key back.
 - When the file changed, the old copy is saved to
   `~/.local/state/kikibindings/` first (the last 10 are kept).
 
