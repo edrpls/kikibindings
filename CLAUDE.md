@@ -31,6 +31,12 @@ fixes change how `install.sh` behaves, review the fixes again.
   was done about each. Findings that weren't fixed are listed as declined,
   with the reason.
 
+## No session links (required)
+
+Never include links to Claude sessions anywhere in the repo or on GitHub:
+no `Claude-Session:` trailers or `claude.ai/code/session…` URLs in commit
+messages, PR or issue descriptions, comments, or files.
+
 ## Conventions
 
 - The file name `net.local.kikibindings.desktop` is the kglobalaccel
@@ -44,11 +50,31 @@ fixes change how `install.sh` behaves, review the fixes again.
 - `install.sh` must stay idempotent and must never change a binding the user
   set. The only thing it writes to `kglobalshortcutsrc` is `none` for a
   shortcut that is new (or whose default changed) when its default key is
-  taken. kglobalaccel only reads the file when
-  it loads the component, so updates unload and reload the component.
-- kglobalaccel only writes keys that differ from the default, so the
-  user's custom keys are exactly the entries under
-  `[services][net.local.kikibindings.desktop]`; uninstall deletes those.
+  taken. kglobalaccel only reads the file when it loads the component, so
+  updates unload and reload the component.
+- kglobalaccel only writes keys that differ from the default, so the entries
+  under `[services][net.local.kikibindings.desktop]` are the user's custom
+  keys plus any conflict `none` the script wrote. All of them are treated as
+  user choices: kept until the user changes them, deleted on uninstall.
+- kglobalaccel keeps an unloaded group's keys in memory and reuses them if
+  the group comes back in the same session, and loading the group makes it
+  rewrite its config from memory ~500 ms later. So `snapshot_bindings` reads
+  the bindings before anything is (re)loaded, and `sync_live` then sets each
+  shortcut's live keys from that snapshot (the entry above, else the
+  default). Both run on every non-dry run in a Plasma session, including
+  when nothing changed. Never re-read the config after a reload.
+- Defaults are a single key that `key_to_int` can convert; the script
+  rejects anything else when it reads the file.
+- Use the non-deprecated kglobalaccel D-Bus methods (`globalShortcutsByKey`,
+  `globalShortcutAvailable`, `setShortcutKeys`,
+  `Component.allShortcutInfos`). `getGlobalShortcutsByKey`,
+  `isGlobalShortcutAvailable`, `setShortcut`, `shortcut` and
+  `defaultShortcut` only exist when kglobalacceld is built with deprecated
+  APIs (Arch builds them, so they show up in introspection), and
+  `defaultShortcut` reports misleading values. If a conflict can't be
+  checked, treat the key as taken.
+- Plasma 6.0.3 is the minimum: earlier kglobalaccel doesn't load shortcuts
+  from desktop actions or notice new files without a re-login.
 - Keep the README table in sync with the `.desktop` file.
 
 ## Testing
@@ -59,8 +85,9 @@ XDG_CONFIG_HOME=$S/cfg XDG_DATA_HOME=$S/data XDG_STATE_HOME=$S/state \
   KIKIBINDINGS_NO_SESSION=1 bash ./install.sh [--dry-run|--list|--uninstall]
 ```
 
-`KIKIBINDINGS_NO_SESSION=1` (exactly `1`) skips all D-Bus calls and the KService cache
-rebuild, so the live desktop isn't touched. Check `desktop-file-validate
-net.local.kikibindings.desktop` after editing the file. Test the live path
+`KIKIBINDINGS_NO_SESSION` set to any non-empty value skips all D-Bus calls
+and the KService cache rebuild, so the live desktop isn't touched. Check
+`desktop-file-validate net.local.kikibindings.desktop` after editing the
+file. Test the live path
 (update that adds and removes an action, uninstall, reinstall) only on your
 own session, and restore it afterwards.
